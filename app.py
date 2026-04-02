@@ -11,7 +11,7 @@ import os
 # =========================
 st.set_page_config(page_title="Insect AI - CNN Model", layout="centered")
 
-st.title("⚙️ Insect Classification AI (CNN from Scratch)")
+st.title("🦟 Insect Classification AI (CNN from Scratch)")
 st.caption("Baseline model without pretrained knowledge")
 st.divider()
 
