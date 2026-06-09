@@ -19,20 +19,29 @@ st.divider()
 # MODEL DOWNLOAD
 # =========================
 
-FILE_ID = "1n8rgaMnq5489tXRfh6Mn45nAa19SEPiL"
+FILE_ID = "1iZb55Lq1jf4h48OpBL6irrv0LXKOKHVV"
+
 MODEL_URL = f"https://drive.google.com/uc?id={FILE_ID}"
-MODEL_PATH = "cnn_model.keras"
+
+MODEL_PATH = "cnn_best.keras"
 
 @st.cache_resource
 def load_model():
+
     if not os.path.exists(MODEL_PATH):
         with st.spinner("Downloading model..."):
-            gdown.download(MODEL_URL, MODEL_PATH, quiet=False)
+            gdown.download(
+                MODEL_URL,
+                MODEL_PATH,
+                quiet=False
+            )
 
-    return keras.models.load_model(MODEL_PATH, compile=False)
+    return keras.models.load_model(
+        MODEL_PATH,
+        compile=False
+    )
 
 model = load_model()
-
 # =========================
 # CLASS NAMES
 # =========================
