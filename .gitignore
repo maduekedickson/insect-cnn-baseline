@@ -1,0 +1,24 @@
+# Python virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Model artifacts
+*.keras
+*.h5
+*.tflite
+*.pb
+variables/
+assets/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Streamlit run files
+.streamlit/
