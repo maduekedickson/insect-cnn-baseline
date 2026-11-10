@@ -1,13 +1,14 @@
 """
 Model loading and downloading utilities with progress tracking.
-Supports direct GitHub Release CDN download, local caching, and custom uploads.
+Supports direct GitHub Release CDN download, local caching, Keras 2/3 compatibility, and custom uploads.
 """
 
 import os
 import urllib.request
+import zipfile
+import json
 import streamlit as st
-import keras
-from src.config import DEFAULT_RELEASE_URL, LOCAL_MODEL_PATH
+from src.config import DEFAULT_RELEASE_URL
 
 MODEL_FILENAME = "trained_model.keras"
 
@@ -26,7 +27,6 @@ def download_with_progress(url: str, dest_path: str):
             if total_size > 0:
                 downloaded = block_num * block_size
                 percent = min(1.0, downloaded / total_size)
-                # Update every 2% to avoid excessive rerenders
                 if percent - self.last_percent >= 0.02 or percent >= 1.0:
                     self.last_percent = percent
                     self.pbar.progress(percent)
@@ -53,25 +53,84 @@ def download_with_progress(url: str, dest_path: str):
         status_text.empty()
 
 
+def sanitize_keras2_config(model_path: str) -> str:
+    """
+    Removes legacy Keras 2 'batch_input_shape' from Conv2D and other layers in config.json
+    so that Keras 3 can deserialize the model without throwing an Unrecognized keyword argument error.
+    """
+    if not model_path.endswith(".keras") or not os.path.exists(model_path):
+        return model_path
+
+    patched_path = model_path.replace(".keras", "_k3_compat.keras")
+    if os.path.exists(patched_path):
+        return patched_path
+
+    try:
+        with zipfile.ZipFile(model_path, "r") as zin:
+            if "config.json" not in zin.namelist():
+                return model_path
+            cfg_bytes = zin.read("config.json")
+            cfg = json.loads(cfg_bytes.decode("utf-8"))
+
+            modified = False
+            layers = cfg.get("config", {}).get("layers", [])
+            for layer in layers:
+                if layer.get("class_name") != "InputLayer":
+                    l_cfg = layer.get("config", {})
+                    if "batch_input_shape" in l_cfg:
+                        del l_cfg["batch_input_shape"]
+                        modified = True
+
+            if not modified:
+                return model_path
+
+            with zipfile.ZipFile(patched_path, "w") as zout:
+                for item in zin.infolist():
+                    if item.filename == "config.json":
+                        zout.writestr("config.json", json.dumps(cfg))
+                    else:
+                        zout.writestr(item, zin.read(item.filename))
+
+        return patched_path
+    except Exception:
+        return model_path
+
+
 @st.cache_resource(show_spinner=False)
 def load_insect_model(custom_model_path: str = None):
     """
-    Loads and caches the Keras CNN model.
-    Checks local directory first, then downloads from GitHub Releases.
+    Loads and caches the model with multi-engine compatibility (tf_keras, Keras 3, and auto-sanitization).
     """
     model_path = custom_model_path or MODEL_FILENAME
 
-    # Check local workspace root
     if not os.path.exists(model_path):
-        # Also check fallback filename 'cnn_best.keras' if present
         if os.path.exists("cnn_best.keras"):
             model_path = "cnn_best.keras"
         else:
-            with st.spinner("Downloading trained CNN weights from GitHub Releases..."):
+            with st.spinner("Downloading trained weights from GitHub Releases..."):
                 download_with_progress(DEFAULT_RELEASE_URL, model_path)
 
+    # Strategy 1: Try legacy tf_keras (handles Keras 2.15 models natively)
     try:
+        import tf_keras as legacy_keras
+        model = legacy_keras.models.load_model(model_path, compile=False)
+        return model, model_path, None
+    except Exception as e_legacy:
+        pass
+
+    # Strategy 2: Try standard keras directly
+    try:
+        import keras
         model = keras.models.load_model(model_path, compile=False)
         return model, model_path, None
-    except Exception as e:
-        return None, model_path, str(e)
+    except Exception as e_keras:
+        pass
+
+    # Strategy 3: Auto-sanitize Keras 2 config to Keras 3 format and reload
+    try:
+        import keras
+        patched_path = sanitize_keras2_config(model_path)
+        model = keras.models.load_model(patched_path, compile=False)
+        return model, patched_path, None
+    except Exception as e_final:
+        return None, model_path, str(e_final)

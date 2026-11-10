@@ -57,18 +57,35 @@ with st.sidebar:
     st.divider()
 
     st.subheader("⚙️ System Status")
-    st.markdown(f"**Target Resolution:** `{IMG_SIZE[0]} × {IMG_SIZE[1]} px`")
-    st.markdown(f"**Species Monitored:** `{len(CLASS_NAMES)} classes`")
     
-    # Model Loading
+    # Model Loading with Keras 2/3 multi-engine compatibility
     with st.spinner("Connecting to model weights..."):
         model, active_path, error = load_insect_model()
+
+    # Dynamic inspection of model architecture
+    eval_size = IMG_SIZE
+    num_model_classes = len(CLASS_NAMES)
+    if model is not None:
+        try:
+            inp = getattr(model, "input_shape", None)
+            if inp and len(inp) == 4 and inp[1] is not None:
+                eval_size = (int(inp[2]), int(inp[1]))
+            out_shape = getattr(model, "output_shape", None)
+            if out_shape and len(out_shape) >= 2:
+                num_model_classes = int(out_shape[-1])
+        except Exception:
+            pass
+
+    st.markdown(f"**Target Input Shape:** `{eval_size[0]} × {eval_size[1]} px`")
+    st.markdown(f"**Model Output Classes:** `{num_model_classes} classes`")
 
     if error:
         st.error(f"❌ Failed to load model: {error}")
         st.info("You can upload a `.keras` file below or verify the download URL.")
     else:
         st.success(f"✅ Model active: `{os.path.basename(active_path)}`")
+        if num_model_classes != len(CLASS_NAMES):
+            st.warning(f"ℹ️ Model has {num_model_classes} outputs (insect dataset has {len(CLASS_NAMES)}). Running in adaptive mode.")
 
     st.divider()
     
@@ -159,7 +176,7 @@ with tab_classifier:
             st.subheader("📸 Input Image")
             st.image(active_image, caption=f"Source: {image_source_name}", use_container_width=True)
             w, h = active_image.size
-            st.caption(f"Original Dimensions: {w} × {h} px | Evaluated at: {IMG_SIZE[0]} × {IMG_SIZE[1]} px")
+            st.caption(f"Original Dimensions: {w} × {h} px | Evaluated at: {eval_size[0]} × {eval_size[1]} px")
 
         with col_pred:
             st.subheader("🎯 Identification Results")
@@ -170,7 +187,7 @@ with tab_classifier:
                 with st.spinner("Analyzing morphology and extracting visual features..."):
                     processed_array = preprocess_image(
                         active_image,
-                        target_size=IMG_SIZE,
+                        target_size=eval_size,
                         rescale=rescale_pixel
                     )
                     predictions = predict_top_k(model, processed_array, class_names=CLASS_NAMES, k=top_k)
@@ -193,7 +210,7 @@ with tab_classifier:
                 st.markdown(f"""
                 <div class="metric-card">
                     <h3 style="margin: 0; color: #1f2937;">{meta.get('common_name', top_pred['class_name'])}</h3>
-                    <p style="font-style: italic; color: #4b5563; margin-top: 4px;">Scientific name: <b>{top_pred['class_name'].replace('_', ' ')}</b></p>
+                    <p style="font-style: italic; color: #4b5563; margin-top: 4px;">Scientific / Class: <b>{top_pred['class_name'].replace('_', ' ')}</b></p>
                     <p>Confidence: <b style="font-size: 1.2em; color: #ff4b4b;">{top_pred['confidence_percent']}</b></p>
                     <p>Vector Status: <b>{meta.get('vector_status', 'N/A')}</b> | Risk: <span class="{risk_class}">{risk}</span></p>
                 </div>
@@ -260,7 +277,11 @@ with tab_benchmarks:
 
     df_scaling = pd.DataFrame(BENCHMARK_RESULTS["Dataset_Scaling"]).set_index("Dataset_Size")
     st.line_chart(df_scaling)
-    st.table(df_scaling.applymap(lambda v: f"{v * 100:.2f}%"))
+    
+    # Modern pandas compatible table formatting (map vs applymap)
+    formatter = lambda v: f"{v * 100:.2f}%" if isinstance(v, (int, float)) else str(v)
+    formatted_scaling = df_scaling.map(formatter) if hasattr(df_scaling, "map") else df_scaling.applymap(formatter)
+    st.table(formatted_scaling)
 
 
 # ------------------------------------------
